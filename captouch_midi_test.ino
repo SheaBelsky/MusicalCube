@@ -1,52 +1,46 @@
-// ---------------------------------------------------------------------------
-//
-// ble_neopixel_mpr121.ino
-//
-// A MIDI sequencer example using two chained NeoPixel sticks, a MPR121
-// capacitive touch breakout, and a Bluefruit Feather.
-//
-// 1x Feather Bluefruit LE 32u4: https://www.adafruit.com/products/2829
-// 2x NeoPixel Sticks: https://www.adafruit.com/product/1426
-// 1x MPR121 breakout: https://www.adafruit.com/products/1982
-//
-// Required dependencies:
-// Adafruit Bluefruit Library: https://github.com/adafruit/Adafruit_BluefruitLE_nRF51
-// Adafruit NeoPixel Library: https://github.com/adafruit/Adafruit_NeoPixel
-// Adafruit MPR121 Library: https://github.com/adafruit/Adafruit_MPR121_Library
-//
-// Author: Todd Treece <todd@uniontownlabs.org>
-// Copyright: (c) 2015-2016 Adafruit Industries
-// License: GNU GPLv3
-//
-// ---------------------------------------------------------------------------
-#include "FifteenStep.h"
-#include "Wire.h"
-#include "Adafruit_CAP1188.h"
+#include <Arduino.h>
+#include <SPI.h>
 #include "Adafruit_BLE.h"
 #include "Adafruit_BluefruitLE_SPI.h"
+#include "Adafruit_BluefruitLE_UART.h"
 #include "Adafruit_BLEMIDI.h"
+#if SOFTWARE_SERIAL_AVAILABLE
+  #include <SoftwareSerial.h>
+#endif
+
 #include "BluefruitConfig.h"
 
 #define FACTORYRESET_ENABLE         1
 #define MINIMUM_FIRMWARE_VERSION    "0.7.0"
 
+
+// Capacative Touch Includes
+#include <Wire.h>
+#include <SPI.h>
+#include <Adafruit_CAP1188.h>
+
 // captouch breakout board init
 Adafruit_CAP1188 cap = Adafruit_CAP1188();
-Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
 
-#define TEMPO    60
 #define BUTTONS  4
-#define IRQ_PIN  A4
-
-// sequencer init
-FifteenStep seq = FifteenStep(1024);
-Adafruit_BLEMIDI blemidi(ble);
 
 // prime dynamic values
-int channel = 0;
+int channel = 1;
 int pitch = 42; 
 int vel = 80;
-int steps = 16;
+
+// Variable to maintain the state of the last touched area
+int touchedArea;
+
+/* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected CS/IRQ/RST */
+Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
+
+/* ...software SPI, using SCK/MOSI/MISO user-defined SPI pins and then user selected CS/IRQ/RST */
+//Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_SCK, BLUEFRUIT_SPI_MISO,
+//                             BLUEFRUIT_SPI_MOSI, BLUEFRUIT_SPI_CS,
+//                             BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
+
+Adafruit_BLEMIDI midi(ble);
 
 bool isConnected = false;
 
@@ -55,10 +49,15 @@ void error(const __FlashStringHelper*err) {
   Serial.println(err);
   while (1);
 }
+
+// callback
 void connected(void)
 {
   isConnected = true;
+
   Serial.println(F(" CONNECTED!"));
+  delay(1000);
+
 }
 
 void disconnected(void)
@@ -67,8 +66,30 @@ void disconnected(void)
   isConnected = false;
 }
 
-void setup() {
+void BleMidiRX(uint16_t timestamp, uint8_t status, uint8_t byte1, uint8_t byte2)
+{
+  Serial.print("[MIDI ");
+  Serial.print(timestamp);
+  Serial.print(" ] ");
 
+  Serial.print(status, HEX); Serial.print(" ");
+  Serial.print(byte1 , HEX); Serial.print(" ");
+  Serial.print(byte2 , HEX); Serial.print(" ");
+
+  Serial.println();
+}
+
+void setup() {
+  // Serial.begin(9600);
+
+  while (!Serial);  // required for Flora & Micro
+  delay(500);
+
+  Serial.begin(115200);
+  Serial.println(F("Adafruit Bluefruit MIDI Example"));
+  Serial.println(F("---------------------------------------"));
+
+  /* Initialise the module */
   Serial.print(F("Initialising the Bluefruit LE module: "));
 
   if ( !ble.begin(VERBOSE_MODE) )
@@ -92,21 +113,24 @@ void setup() {
   Serial.println("Requesting Bluefruit info:");
   /* Print Bluefruit information */
   ble.info();
-  
+
   /* Set BLE callbacks */
   ble.setConnectCallback(connected);
   ble.setDisconnectCallback(disconnected);
-  
+
+  // Set MIDI RX callback
+  midi.setRxCallback(BleMidiRX);
+
   Serial.println(F("Enable MIDI: "));
-  if ( ! blemidi.begin(true) )
+  if ( ! midi.begin(true) )
   {
     error(F("Could not enable MIDI"));
   }
-    
+
   ble.verbose(false);
   Serial.print(F("Waiting for a connection..."));
-  
-  // Initialize the cap touch sensor, if using i2c you can pass in the i2c address
+
+  // Initialize the sensor, if using i2c you can pass in the i2c address
   // if (!cap.begin(0x28)) {
   if (!cap.begin()) {
     Serial.println("CAP1188 not found");
@@ -114,49 +138,50 @@ void setup() {
   }
   Serial.println("CAP1188 found!");
 
-  // start sequencer and set callbacks
-  seq.begin(TEMPO, steps);
-  seq.setMidiHandler(midi);
-//  seq.setStepHandler(step);
-
 }
 
 void loop() {
+  // interval for each scanning ~ 500ms (non blocking)
+  ble.update(500);
 
+  // bail if not connected
+  if (! isConnected)
+    return;
+
+
+  // Capacative touch
   uint8_t touched = cap.touched();
 
   if (touched == 0) {
     // No touch detected
     return;
   }
-  
-  for (uint8_t i=0; i<4; i++) {
+
+  // Determine which section of the capacative touch sensor was touched, if any
+  for (uint8_t i=0; i<8; i++) {
     if (touched & (1 << i)) {
-      Serial.print("C"); Serial.print(i+1); Serial.print("\t");
-      // set midi channel to the selected touch pad, 1 to 4
-      channel = i+1;
-      handle_note();
+      touchedArea = i+1;
+      channel = touchedArea;
     }
   }
-  Serial.println();
-  delay(100);
 
-  // this is needed to keep the sequencer
-  // running. there are other methods for
-  // start, stop, and pausing the steps
-  seq.run();
+  // send note on
+  sendmidi(channel, 0x9, pitch, vel);
+  delay(500);
+  // send note off
+  sendmidi(channel, 0x8, pitch, 0x0);
+  delay(500);
+  Serial.print("Sending note on channel");
+  Serial.println(channel);
 
 }
 
-///////////////////////////////////////////////////////////////////////////////
-//                                                                           //
-//                         SEQUENCER/MIDI CALLBACKS                          //
-//                                                                           //
-///////////////////////////////////////////////////////////////////////////////
-
-// the callback that will be called by the sequencer when it needs
-// to send midi commands over BLE.
-void midi(byte channel, byte command, byte arg1, byte arg2) {
+// the callback that will be called to send midi commands over BLE.
+// example usage - note on
+// sendmidi(channel, 0x9, pitch, vel);
+// example usage - note off
+// sendmidi(channel, 0x8, pitch, 0x0);
+void sendmidi(byte channel, byte command, byte arg1, byte arg2) {
 
   // init combined byte
   byte combined = command;
@@ -167,14 +192,6 @@ void midi(byte channel, byte command, byte arg1, byte arg2) {
     combined |= channel;
   }
 
-  blemidi.send(combined, arg1, arg2);
+  midi.send(combined, arg1, arg2);
 
-}
-
-// deal with note on and off
-void handle_note() {
-  // play pressed note
-  midi(channel, 0x9, pitch, vel);
-  // play note off
-  // midi(channel, 0x8, pitch[i], 0x0);
 }
