@@ -145,8 +145,9 @@ void loop() {
   ble.update(500);
 
   // bail if not connected
-  if (! isConnected)
-    return;
+  if (! isConnected) {
+    Serial.println("No connection");
+  }
 
 
   // Capacative touch
@@ -154,7 +155,7 @@ void loop() {
 
   if (touched == 0) {
     // No touch detected
-    return;
+    Serial.println("no touched detected");
   }
 
   // Determine which section of the capacative touch sensor was touched, if any
