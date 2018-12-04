@@ -30,7 +30,7 @@ Adafruit_CAP1188 cap = Adafruit_CAP1188();
 
 // prime dynamic values
 int channel = 1;
-int pitch = 42; 
+int pitch = 80;
 int vel = 80;
 
 // Variable to maintain the state of the last touched area
@@ -161,7 +161,7 @@ void loop() {
   lux = tcs.calculateLux(r, g, b);
   // Map the R value from the sensor to a value between 8600 (min) and 65535 (max) to 0 (min) and 100 (max)
   int x = map(r, 8600,  65535, 0, 100);
-  // Map the R value from the sensor to a value between 14700 (min) and 65535 (max) to 0 (min) and 100 (max)
+  // Map the B value from the sensor to a value between 14700 (min) and 65535 (max) to 0 (min) and 100 (max)
   int y = map(b, 14700, 65535, 0, 100);
   x = constrain(x, 50, 127);
   y = constrain(y, 50, 127);
@@ -193,7 +193,8 @@ void loop() {
       channel = touchedArea;
     }
   }
-
+  pitch = x;
+  vel = y;
   // send note on
   sendmidi(channel, 0x9, pitch, vel);
   delay(500);
