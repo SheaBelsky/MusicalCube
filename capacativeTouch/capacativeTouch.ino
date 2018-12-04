@@ -57,10 +57,9 @@ void setup() {
   strip.show();
 
   // Initialize the sensor, if using i2c you can pass in the i2c address
-  // if (!cap.begin(0x28)) {
-  if (!cap.begin()) {
+  while (!cap.begin(0x28)) {
     Serial.println("CAP1188 not found");
-    while (1);
+    delay(2000);
   }
   Serial.println("CAP1188 found!");
 }
@@ -83,7 +82,8 @@ void loop() {
       touchedArea = i+1;
     }
   }
-
+  
+  Serial.println(touchedArea);
   switch(touchedArea) {
     case 1:
       ringColor = strip.Color(255, 0, 0);
@@ -98,7 +98,6 @@ void loop() {
       ringColor = strip.Color(255, 255, 0);
       break;
     default:
-      Serial.println(touchedArea);
       break;
   }
   colorWipe(ringColor, defaultWait);

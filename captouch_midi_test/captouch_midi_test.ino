@@ -4,6 +4,8 @@
 #include "Adafruit_BluefruitLE_SPI.h"
 #include "Adafruit_BluefruitLE_UART.h"
 #include "Adafruit_BLEMIDI.h"
+#include "Adafruit_TCS34725.h"
+
 #if SOFTWARE_SERIAL_AVAILABLE
   #include <SoftwareSerial.h>
 #endif
@@ -12,7 +14,9 @@
 
 #define FACTORYRESET_ENABLE         1
 #define MINIMUM_FIRMWARE_VERSION    "0.7.0"
-
+// Color sensor
+/* Initialise with specific int time and gain values */
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_4X);
 
 // Capacative Touch Includes
 #include <Wire.h>
@@ -92,8 +96,7 @@ void setup() {
   /* Initialise the module */
   Serial.print(F("Initialising the Bluefruit LE module: "));
 
-  if ( !ble.begin(VERBOSE_MODE) )
-  {
+  if ( !ble.begin(VERBOSE_MODE) ){
     error(F("Couldn't find Bluefruit, make sure it's in CoMmanD mode & check wiring?"));
   }
   Serial.println( F("OK!") );
@@ -122,8 +125,7 @@ void setup() {
   midi.setRxCallback(BleMidiRX);
 
   Serial.println(F("Enable MIDI: "));
-  if ( ! midi.begin(true) )
-  {
+  if (!midi.begin(true)) {
     error(F("Could not enable MIDI"));
   }
 
@@ -131,22 +133,48 @@ void setup() {
   Serial.print(F("Waiting for a connection..."));
 
   // Initialize the sensor, if using i2c you can pass in the i2c address
-  // if (!cap.begin(0x28)) {
-  if (!cap.begin()) {
-    Serial.println("CAP1188 not found");
+  while (!cap.begin(0x28)) {
+    Serial.println("No capacative touch sensor");
+    delay(2000);
+  }
+  Serial.println("CAP1188 (capacative touch sensor) found!");
+
+  // Color sensor
+  while (!tcs.begin()) {
+    Serial.println("no color sensor");
+    delay(2000);
+  }
+  if (tcs.begin()) {
+    Serial.println("Found color sensor");
+  } else {
+    Serial.println("No TCS34725 (color sensor) found ... check your connections");
     while (1);
   }
-  Serial.println("CAP1188 found!");
 
 }
 
 void loop() {
+  // Color sensor
+  uint16_t r, g, b, c, colorTemp, lux;
+  tcs.getRawData(&r, &g, &b, &c);
+  colorTemp = tcs.calculateColorTemperature(r, g, b);
+  lux = tcs.calculateLux(r, g, b);
+  // Map the R value from the sensor to a value between 8600 (min) and 65535 (max) to 0 (min) and 100 (max)
+  int x = map(r, 8600,  65535, 0, 100);
+  // Map the R value from the sensor to a value between 14700 (min) and 65535 (max) to 0 (min) and 100 (max)
+  int y = map(b, 14700, 65535, 0, 100);
+  x = constrain(x, 50, 127);
+  y = constrain(y, 50, 127);
+  Serial.print("coordiantes:");
+  Serial.print(x); Serial.print(y); Serial.println();
+  
   // interval for each scanning ~ 500ms (non blocking)
   ble.update(500);
 
   // bail if not connected
-  if (! isConnected) {
-    Serial.println("No connection");
+  if (!isConnected) {
+    Serial.println("No Bluetooth connection");
+    delay(500); 
   }
 
 
@@ -155,7 +183,7 @@ void loop() {
 
   if (touched == 0) {
     // No touch detected
-    Serial.println("no touched detected");
+    Serial.println("No touch detected");
   }
 
   // Determine which section of the capacative touch sensor was touched, if any
