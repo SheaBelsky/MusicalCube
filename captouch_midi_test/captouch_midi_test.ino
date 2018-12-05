@@ -4,24 +4,37 @@
 #include "Adafruit_BluefruitLE_SPI.h"
 #include "Adafruit_BluefruitLE_UART.h"
 #include "Adafruit_BLEMIDI.h"
+#include <Adafruit_CAP1188.h>
+#include <Adafruit_NeoPixel.h>
 #include "Adafruit_TCS34725.h"
-
+#include <SPI.h>
+#include <Wire.h>
+#ifdef __AVR__
+  #include <avr/power.h>
+#endif
 #if SOFTWARE_SERIAL_AVAILABLE
   #include <SoftwareSerial.h>
 #endif
 
 #include "BluefruitConfig.h"
 
+// Definitions
 #define FACTORYRESET_ENABLE         1
 #define MINIMUM_FIRMWARE_VERSION    "0.7.0"
+#define RGB_PIN A5
+
+// RGB Ring
+int numPins = 24;
+int defaultWait = defaultWait;
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(numPins, RGB_PIN, NEO_GRB + NEO_KHZ800);
+// Maintains state of ring color
+uint32_t ringColor;
+
 // Color sensor
 /* Initialise with specific int time and gain values */
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_4X);
 
 // Capacative Touch Includes
-#include <Wire.h>
-#include <SPI.h>
-#include <Adafruit_CAP1188.h>
 
 // captouch breakout board init
 Adafruit_CAP1188 cap = Adafruit_CAP1188();
@@ -38,12 +51,6 @@ int touchedArea;
 
 /* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected CS/IRQ/RST */
 Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
-
-/* ...software SPI, using SCK/MOSI/MISO user-defined SPI pins and then user selected CS/IRQ/RST */
-//Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_SCK, BLUEFRUIT_SPI_MISO,
-//                             BLUEFRUIT_SPI_MOSI, BLUEFRUIT_SPI_CS,
-//                             BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
-
 Adafruit_BLEMIDI midi(ble);
 
 bool isConnected = false;
@@ -55,8 +62,7 @@ void error(const __FlashStringHelper*err) {
 }
 
 // callback
-void connected(void)
-{
+void connected(void) {
   isConnected = true;
 
   Serial.println(F(" CONNECTED!"));
@@ -64,14 +70,12 @@ void connected(void)
 
 }
 
-void disconnected(void)
-{
+void disconnected(void) {
   Serial.println("disconnected");
   isConnected = false;
 }
 
-void BleMidiRX(uint16_t timestamp, uint8_t status, uint8_t byte1, uint8_t byte2)
-{
+void BleMidiRX(uint16_t timestamp, uint8_t status, uint8_t byte1, uint8_t byte2) {
   Serial.print("[MIDI ");
   Serial.print(timestamp);
   Serial.print(" ] ");
@@ -84,15 +88,11 @@ void BleMidiRX(uint16_t timestamp, uint8_t status, uint8_t byte1, uint8_t byte2)
 }
 
 void setup() {
-  // Serial.begin(9600);
-
   while (!Serial);  // required for Flora & Micro
   delay(500);
 
   Serial.begin(115200);
-  Serial.println(F("Adafruit Bluefruit MIDI Example"));
-  Serial.println(F("---------------------------------------"));
-
+  Serial.print("Checking for Bluetooth...");
   /* Initialise the module */
   Serial.print(F("Initialising the Bluefruit LE module: "));
 
@@ -121,6 +121,10 @@ void setup() {
   ble.setConnectCallback(connected);
   ble.setDisconnectCallback(disconnected);
 
+  Serial.println("Bluetooth good!");
+  Serial.println("==============");
+  Serial.println("Checking MIDI connection...");
+
   // Set MIDI RX callback
   midi.setRxCallback(BleMidiRX);
 
@@ -128,9 +132,10 @@ void setup() {
   if (!midi.begin(true)) {
     error(F("Could not enable MIDI"));
   }
-
   ble.verbose(false);
-  Serial.print(F("Waiting for a connection..."));
+  Serial.println("MIDI good!");
+  Serial.println("==============");
+  Serial.println("Checking capacative touch sensor...");
 
   // Initialize the sensor, if using i2c you can pass in the i2c address
   while (!cap.begin(0x28)) {
@@ -138,19 +143,26 @@ void setup() {
     delay(2000);
   }
   Serial.println("CAP1188 (capacative touch sensor) found!");
-
+  Serial.println("==============");
+  Serial.println("Checking RGB color sensor...");
+  
   // Color sensor
   while (!tcs.begin()) {
-    Serial.println("no color sensor");
+    Serial.println("No RGB color sensor found");
     delay(2000);
   }
-  if (tcs.begin()) {
-    Serial.println("Found color sensor");
-  } else {
-    Serial.println("No TCS34725 (color sensor) found ... check your connections");
-    while (1);
-  }
-
+  Serial.println("TCS34725 (RGB color sensor) found!");
+  Serial.println("==============");
+  Serial.println("Checking RGB ring...");
+  
+  // Begin the RGB strip
+  strip.begin();
+  strip.setBrightness(20);
+  // Set all the pixels to be off
+  strip.show();
+  Serial.println("RGB ring configured!");
+  Serial.println("==============");
+  Serial.println("All systems ready for takeoff");
 }
 
 void loop() {
@@ -163,18 +175,18 @@ void loop() {
   int x = map(r, 8600,  65535, 0, 100);
   // Map the B value from the sensor to a value between 14700 (min) and 65535 (max) to 0 (min) and 100 (max)
   int y = map(b, 14700, 65535, 0, 100);
-  x = constrain(x, 50, 127);
-  y = constrain(y, 50, 127);
-  Serial.print("coordiantes:");
-  Serial.print(x); Serial.print(y); Serial.println();
+  x = constrain(x, 30, 127);
+  y = constrain(y, 30, 127);
+  Serial.print("Coordinates: ");
+  Serial.print(x); Serial.print(", "); Serial.print(y); Serial.println();
   
   // interval for each scanning ~ 500ms (non blocking)
-  ble.update(500);
+  ble.update(10);
 
   // bail if not connected
   if (!isConnected) {
     Serial.println("No Bluetooth connection");
-    delay(500); 
+    //delay(500);
   }
 
 
@@ -197,13 +209,40 @@ void loop() {
   vel = y;
   // send note on
   sendmidi(channel, 0x9, pitch, vel);
-  delay(500);
+//  delay(500);
   // send note off
   sendmidi(channel, 0x8, pitch, 0x0);
-  delay(500);
-  Serial.print("Sending note on channel");
+  Serial.print("Sending note on channel ");
   Serial.println(channel);
 
+  // RGB ring update
+  switch(touchedArea) {
+    case 1:
+      ringColor = strip.Color(255, 0, 0);
+      break;
+    case 2:
+      ringColor = strip.Color(0, 255, 0);
+      break;
+    case 3:
+      ringColor = strip.Color(0, 0, 255);
+      break;
+    case 4:
+      ringColor = strip.Color(255, 255, 0);
+      break;
+    default:
+      break;
+  }
+  colorWipe(ringColor, defaultWait);
+//  delay(defaultWait);
+}
+
+// Fill the dots one after the other with a color
+void colorWipe(uint32_t c, uint8_t wait) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
+    strip.show();
+    delay(wait);
+  }
 }
 
 // the callback that will be called to send midi commands over BLE.
@@ -223,5 +262,4 @@ void sendmidi(byte channel, byte command, byte arg1, byte arg2) {
   }
 
   midi.send(combined, arg1, arg2);
-
 }
