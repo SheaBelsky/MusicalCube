@@ -57,7 +57,9 @@ bool isConnected = false;
 
 // A small helper
 void error(const __FlashStringHelper*err) {
-  Serial.println(err);
+  if (!isConnected) {
+    Serial.println(err);
+  }
   while (1);
 }
 
@@ -76,15 +78,17 @@ void disconnected(void) {
 }
 
 void BleMidiRX(uint16_t timestamp, uint8_t status, uint8_t byte1, uint8_t byte2) {
-  Serial.print("[MIDI ");
-  Serial.print(timestamp);
-  Serial.print(" ] ");
-
-  Serial.print(status, HEX); Serial.print(" ");
-  Serial.print(byte1 , HEX); Serial.print(" ");
-  Serial.print(byte2 , HEX); Serial.print(" ");
-
-  Serial.println();
+  if (!isConnected) {
+    Serial.print("[MIDI ");
+    Serial.print(timestamp);
+    Serial.print(" ] ");
+  
+    Serial.print(status, HEX); Serial.print(" ");
+    Serial.print(byte1 , HEX); Serial.print(" ");
+    Serial.print(byte2 , HEX); Serial.print(" ");
+  
+    Serial.println();
+  }
 }
 
 void setup() {
@@ -177,8 +181,11 @@ void loop() {
   int y = map(b, 14700, 65535, 0, 100);
   x = constrain(x, 30, 127);
   y = constrain(y, 30, 127);
-  Serial.print("Coordinates: ");
-  Serial.print(x); Serial.print(", "); Serial.print(y); Serial.println();
+  if (!isConnected) {
+    Serial.print("Coordinates: ");
+    Serial.print(x); Serial.print(", "); Serial.print(y); Serial.println();
+  }
+  
   
   // interval for each scanning ~ 500ms (non blocking)
   ble.update(10);
@@ -193,7 +200,7 @@ void loop() {
   // Capacative touch
   uint8_t touched = cap.touched();
 
-  if (touched == 0) {
+  if (touched == 0 && !isConnected) {
     // No touch detected
     Serial.println("No touch detected");
   }
@@ -212,8 +219,12 @@ void loop() {
 //  delay(500);
   // send note off
   sendmidi(channel, 0x8, pitch, 0x0);
-  Serial.print("Sending note on channel ");
-  Serial.println(channel);
+  
+  if (!isConnected) {
+    Serial.print("Sending note on channel ");
+    Serial.println(channel);
+  }
+  
 
   // RGB ring update
   switch(touchedArea) {
@@ -233,7 +244,6 @@ void loop() {
       break;
   }
   colorWipe(ringColor, defaultWait);
-//  delay(defaultWait);
 }
 
 // Fill the dots one after the other with a color
