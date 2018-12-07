@@ -22,6 +22,7 @@
 #define FACTORYRESET_ENABLE         1
 #define MINIMUM_FIRMWARE_VERSION    "0.7.0"
 #define RGB_PIN A5
+#define VBATPIN A9
 
 // RGB Ring
 int numPins = 24;
@@ -133,8 +134,9 @@ void setup() {
   midi.setRxCallback(BleMidiRX);
 
   Serial.println(F("Enable MIDI: "));
-  if (!midi.begin(true)) {
-    error(F("Could not enable MIDI"));
+  while (!midi.begin(true)) {
+    Serial.println("Could not enable MIDI");
+    delay(2000);
   }
   ble.verbose(false);
   Serial.println("MIDI good!");
@@ -170,17 +172,25 @@ void setup() {
 }
 
 void loop() {
+  if (!isConnected) {
+    float measuredvbat = analogRead(VBATPIN);
+    measuredvbat *= 2;    // we divided by 2, so multiply back
+    measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
+    measuredvbat /= 1024; // convert to voltage
+    Serial.print("VBat: " ); Serial.println(measuredvbat);
+  }
+  
   // Color sensor
   uint16_t r, g, b, c, colorTemp, lux;
   tcs.getRawData(&r, &g, &b, &c);
   colorTemp = tcs.calculateColorTemperature(r, g, b);
   lux = tcs.calculateLux(r, g, b);
   // Map the R value from the sensor to a value between 8600 (min) and 65535 (max) to 0 (min) and 100 (max)
-  int x = map(r, 8600,  65535, 0, 100);
+  // pitch
+  int x = map(r, 4620,  65535, 40, 127);
   // Map the B value from the sensor to a value between 14700 (min) and 65535 (max) to 0 (min) and 100 (max)
-  int y = map(b, 14700, 65535, 0, 100);
-  x = constrain(x, 30, 127);
-  y = constrain(y, 30, 127);
+  // volume
+  int y = map(b, 3725, 53030, 60, 127);
   if (!isConnected) {
     Serial.print("Coordinates: ");
     Serial.print(x); Serial.print(", "); Serial.print(y); Serial.println();
@@ -216,7 +226,7 @@ void loop() {
   vel = y;
   // send note on
   sendmidi(channel, 0x9, pitch, vel);
-//  delay(500);
+  delay(250);
   // send note off
   sendmidi(channel, 0x8, pitch, 0x0);
   
